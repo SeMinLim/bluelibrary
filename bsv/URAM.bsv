@@ -1,6 +1,6 @@
 //=============================================================================
 // File: URAM.bsv
-// Description: BSV Standard Library Compatible URAM Package
+// Description: Pure URAM Core Servers
 //=============================================================================
 package URAM;
 
@@ -142,47 +142,6 @@ module mkURAM2Server#(BRAM_Configure cfg)(BRAM2Port#(addr, data))
 			endmethod
 		endinterface
 	endinterface
-endmodule
-//--------------------------------------------------------------------------
-// [3] Sized URAM FIFO
-//--------------------------------------------------------------------------
-module mkSizedURAMFIFO#(Integer depth)(FIFO#(data))
-	provisos (Bits#(data, sz_data));
-
-	BRAM2Port#(Bit#(16), data) uram <- mkURAM2Server(defaultValue);
-
-	Reg#(Bit#(17)) wrPtr  <- mkReg(0);
-	Reg#(Bit#(17)) reqPtr <- mkReg(0);
-	Reg#(Bit#(17)) deqPtr <- mkReg(0);
-
-	FIFOF#(data) outBuffer <- mkSizedFIFOF(8); 
-
-	rule prefetch ( (wrPtr - reqPtr) > 0 && (reqPtr - deqPtr) < 8 );
-		uram.portB.request.put(BRAMRequest{write:False, responseOnWrite:False, address:truncate(reqPtr), datain:?});
-		reqPtr <= reqPtr + 1;
-	endrule
-
-	rule gather;
-		let d <- uram.portB.response.get();
-		outBuffer.enq(d);
-	endrule
-
-
-	method Action enq(data d) if ( (wrPtr - deqPtr) < fromInteger(depth) );
-		uram.portA.request.put(BRAMRequest{write:True, responseOnWrite:False, address:truncate(wrPtr), datain:d});
-		wrPtr <= wrPtr + 1;
-	endmethod
-	method Action deq();
-		outBuffer.deq(); 
-		deqPtr <= deqPtr + 1;
-	endmethod
-	method data first() = outBuffer.first();
-	method Action clear();
-		wrPtr <= 0; 
-		reqPtr <= 0; 
-		deqPtr <= 0; 
-		outBuffer.clear();
-	endmethod
 endmodule
 
 endpackage
