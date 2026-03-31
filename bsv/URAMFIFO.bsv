@@ -1,98 +1,57 @@
-//=============================================================================
-// File: URAMFIFO.bsv
-// Description: High-Performance URAM-based FIFO (Drop-in for BRAMFIFO)
-// Features:
-// - 100% Concurrent Enq/Deq (Free-running counters, no scheduling conflicts)
-// - Dynamic Depth & Resource Trimming (Wrap-around pointers for Vivado)
-// - Latency Hiding (Internal prefetch buffer)
-//=============================================================================
 package URAMFIFO;
 
-import BRAM::*;
-import URAM::*;     
+import FIFO  :: *;
+import FIFOF :: *;
 
-import FIFO::*;
-import FIFOF::*;
-import SpecialFIFOs::*;
-//--------------------------------------------------------------------------
-// [1] Core Implementation: Sized URAM FIFOF
-//--------------------------------------------------------------------------
-module mkSizedURAMFIFOF#(Integer depth)(FIFOF#(data))
-	provisos (Bits#(data, sz_data));
+export mkSizedURAMFIFOF;
+export mkSizedURAMFIFO;
 
-	// Max 64K, but Vivado will use only actual needed depth
-	BRAM2Port#(Bit#(16), data) uram <- mkURAM2Server(defaultValue);
+import "BVI" URAMFIFO =
+module vURAMFIFOF#(Integer depth)
+                 (FIFOF#(t))
+   provisos(Bits#(t, st), Add#(1, z__, st));
 
-	// Free-running counters with no conflicts and full pipelining scheme
-	Reg#(Bit#(17)) totalEnq <- mkReg(0); 
-	Reg#(Bit#(17)) totalReq <- mkReg(0); 
-	Reg#(Bit#(17)) totalDeq <- mkReg(0); 
+   parameter DATA_WIDTH = valueOf(st);
+   parameter DEPTH      = depth;
 
-	Reg#(Bit#(16)) wrPtr  <- mkReg(0); 
-	Reg#(Bit#(16)) reqPtr <- mkReg(0); 
+   default_clock clk(CLK);
+   default_reset rst(RST);
 
-	// Latency hiding buffer
-	FIFOF#(data) outBuffer <- mkSizedFIFOF(8); 
+   method enq(DI) enable(ENQ);
+   method deq() enable(DEQ);
+   method DO first();
+   method FULL_N notFull();
+   method EMPTY_N notEmpty();
+   method clear() enable(CLR);
 
-	// State calculations via 2's complement
-	Bit#(17) count              = totalEnq - totalDeq;
-	Bit#(17) availToReq         = totalEnq - totalReq;
-	Bit#(17) itemsInFlightOrBuf = totalReq - totalDeq;
+   schedule (first, notEmpty) CF (first, notEmpty);
+   schedule notFull CF notFull;
+   schedule enq C enq;
+   schedule deq C deq;
+   schedule first SB deq;
+   schedule notEmpty SB deq;
+   schedule notFull SB enq;
+   schedule (enq, notFull) CF (deq, first, notEmpty);
+   schedule clear C (clear, enq, deq, first, notEmpty, notFull);
+endmodule: vURAMFIFOF
 
-	// Pointer wrap-around for wasting resource like dumbass 
-	function Bit#(16) nextPtr(Bit#(16) p);
-		return (p == fromInteger(depth - 1)) ? 0 : p + 1;
-	endfunction
+module mkSizedURAMFIFOF#(Integer n)
+                        (FIFOF#(t))
+   provisos(Bits#(t, st), Add#(1, z__, st));
 
-	// Rules: URAM -> Buffer Prefetch
-	rule prefetch ( (availToReq > 0) && (itemsInFlightOrBuf < 8) );
-		uram.portB.request.put(BRAMRequest{write:False, responseOnWrite:False, address:reqPtr, datain:?});
-		reqPtr   <= nextPtr(reqPtr);
-		totalReq <= totalReq + 1;
-	endrule
+   if (n < 1)
+      errorM("mkSizedURAMFIFOF: depth must be >= 1.");
 
-	rule gather;
-		let d <- uram.portB.response.get();
-		outBuffer.enq(d);
-	endrule
+   let f <- vURAMFIFOF(n);
+   return f;
+endmodule: mkSizedURAMFIFOF
 
+module mkSizedURAMFIFO#(Integer n)
+                       (FIFO#(t))
+   provisos(Bits#(t, st), Add#(1, z__, st));
 
-	method Action enq(data d) if ( count < fromInteger(depth) );
-		uram.portA.request.put(BRAMRequest{write:True, responseOnWrite:False, address:wrPtr, datain:d});
-		wrPtr    <= nextPtr(wrPtr);
-		totalEnq <= totalEnq + 1;
-	endmethod
-	method Action deq() if ( outBuffer.notEmpty() );
-		outBuffer.deq(); 
-		totalDeq <= totalDeq + 1;
-	endmethod
-	method data first() if ( outBuffer.notEmpty() );
-		return outBuffer.first();
-	endmethod
-	method Action clear();
-		totalEnq <= 0;
-		totalReq <= 0;
-		totalDeq <= 0;
-		wrPtr    <= 0; 
-		reqPtr   <= 0; 
-		outBuffer.clear();
-	endmethod
-	method Bool notEmpty() = outBuffer.notEmpty();
-	method Bool notFull()  = (count < fromInteger(depth));
-endmodule
-//--------------------------------------------------------------------------
-// [2] Wrapper: Sized URAM FIFO
-//--------------------------------------------------------------------------
-module mkSizedURAMFIFO#(Integer depth)(FIFO#(data))
-	provisos (Bits#(data, sz_data));
+   let f <- mkSizedURAMFIFOF(n);
+   return fifofToFifo(f);
+endmodule: mkSizedURAMFIFO
 
-	FIFOF#(data) f <- mkSizedURAMFIFOF(depth);
-
-
-	method enq   = f.enq;
-	method deq   = f.deq;
-	method first = f.first;
-	method clear = f.clear;
-endmodule
-
-endpackage
+endpackage: URAMFIFO
