@@ -49,7 +49,8 @@ module mkPipelinedShift#(Bool shiftRight)(BLShiftIfc#(in_type, shiftsz, shift_bi
 
 				// For a partial last stage, ignore out-of-range shift bits explicitly.
 				if ((shiftIdx < totalShiftSz) && (stageAmt[j] == 1'b1)) begin
-					Integer shiftAmount = 1 << shiftIdx;
+					UInt#(shiftsz) shiftAmount = 1;
+					shiftAmount = shiftAmount << shiftIdx;
 
 					if (shiftRight) begin
 						shiftedData = shiftedData >> shiftAmount;
