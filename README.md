@@ -52,4 +52,4 @@ Generating the cores is only the first step. If your Vivado or Vitis packaging f
 For example, this repository includes `core/fp_import.tcl`, which provides an `addFpCores` helper for importing the generated floating-point IP cores into the current project. Its intended use is in a packaging flow where RTL is added first and the generated `.xci` files are imported before compile-order update and IP packaging.
 
 ## Notes
-
+Maintained by Se-Min Lim
